@@ -38,6 +38,7 @@
       .step.on { background:var(--orange); color:#fff; }
       .step.ring-hl { box-shadow: 0 0 0 3px rgba(255,140,66,0.35); outline: 2px solid var(--orange); outline-offset: 2px; }
       .btn { width:100%; border:0; border-radius:999px; padding:12px; color:#fff; font-weight:800; cursor:pointer; font-family:'Noto Sans SC',sans-serif; }
+      .btn:disabled { cursor:wait; opacity:.72; }
       .btn-mint { background:var(--mint); } .btn-mint:hover{ background:#66beb1; }
       .btn-orange { background:var(--orange); } .btn-orange:hover{ background:var(--orange2); }
       .mono { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,'Courier New',monospace; }
@@ -104,16 +105,21 @@
 
           <div id="p1" style="margin-top:14px">
             <div style="background:#FFF8F0;border-radius:20px;padding:12px">
-              <div id="priceLine" class="title" style="font-size:22px">¥29 / 月</div>
-              <div class="muted">持续支持食物与医疗，不是一次性捐款，而是长期陪伴。</div>
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
+                <div>
+                  <div id="priceLine" class="title" style="font-size:22px">¥29 / 月</div>
+                  <div class="muted">持续支持食物与医疗，不是一次性捐款，而是长期陪伴。</div>
+                </div>
+                <button id="adoptNowBtn" type="button" class="btn btn-mint" style="width:auto;padding:12px 22px;flex-shrink:0" onclick="startCloudAdoption()">云领养</button>
+              </div>
             </div>
           </div>
 
           <div id="p2" style="margin-top:14px;display:none">
-            <div class="muted" style="margin-bottom:8px">选择钱包以继续链上签名</div>
-            <button type="button" class="btn" style="background:#fff;color:#5C3D2E;border:1px solid #f2d5c3;margin-bottom:8px" onclick="confirmTx('MetaMask')">MetaMask</button>
-            <button type="button" class="btn" style="background:#fff;color:#5C3D2E;border:1px solid #f2d5c3;margin-bottom:8px" onclick="confirmTx('WalletConnect')">WalletConnect</button>
-            <button type="button" class="btn" style="background:#fff;color:#5C3D2E;border:1px solid #f2d5c3" onclick="confirmTx('Coinbase')">Coinbase</button>
+            <div class="muted" style="margin-bottom:8px">当前仅支持 MetaMask，点击后会先进行签名认证，再发起测试网付款。</div>
+            <button type="button" class="btn" style="background:#fff;color:#5C3D2E;border:1px solid #f2d5c3;margin-bottom:8px" onclick="startCloudAdoption()">MetaMask</button>
+            <button type="button" class="btn" style="background:#fff;color:#B89A8B;border:1px solid #f2d5c3;margin-bottom:8px" onclick="unsupportedWallet('WalletConnect')">WalletConnect（暂未开放）</button>
+            <button type="button" class="btn" style="background:#fff;color:#B89A8B;border:1px solid #f2d5c3" onclick="unsupportedWallet('Coinbase')">Coinbase（暂未开放）</button>
           </div>
 
           <div id="p3" style="margin-top:14px;display:none;text-align:center">
@@ -192,10 +198,22 @@
       ];
 
       let current = 0;
-      let wallet='', tx='', guarded=false;
+      let wallet='', tx='', guarded=false, walletAddress='', isAdopting=false;
       const explorer='https://testnet.snowtrace.io/tx/';
       const hex=(n)=>{const c='abcdef0123456789';let s='0x';for(let i=0;i<n;i++)s+=c[Math.floor(Math.random()*c.length)];return s};
       const short=(h)=>h.slice(0,10)+'...'+h.slice(-6);
+      const shortAddress=(h)=>h.slice(0,6)+'...'+h.slice(-4);
+      const NAV_HINT_DEFAULT='已定位到下方「步骤 2 · 连接钱包」，请点选 MetaMask / WalletConnect / Coinbase。';
+      const FUJI_CHAIN = {
+        chainId: '0xa869',
+        chainName: 'Avalanche Fuji C-Chain',
+        nativeCurrency: { name: 'Avalanche', symbol: 'AVAX', decimals: 18 },
+        rpcUrls: ['https://api.avax-test.network/ext/bc/C/rpc'],
+        blockExplorerUrls: ['https://testnet.snowtrace.io/'],
+      };
+      // Fuji demo 收款地址，上主网前请替换成正式收款地址或合约地址。
+      const DEMO_PAYMENT_TO = '0x000000000000000000000000000000000000dEaD';
+      const DEMO_PAYMENT_VALUE_HEX = '0x' + (290000000000000n).toString(16);
 
       function animateHeroIn(){
         const img = document.getElementById('heroImg');
@@ -279,9 +297,12 @@
         ).join('');
         document.querySelectorAll('#animalTabs .tab').forEach((el,idx)=>el.classList.toggle('on', idx===i));
         guarded = false; wallet=''; tx='';
-        const btn=document.getElementById('navWalletBtn');
-        btn.classList.remove('connected');
-        btn.textContent='🔗 连接钱包';
+        resetAdoptionButton();
+        if (walletAddress) {
+          setNavWalletConnected(shortAddress(walletAddress));
+        } else {
+          resetNavWallet();
+        }
         document.getElementById('statusBadge').textContent='等待守护者';
         document.getElementById('statusBadge').className='badge wait';
         document.getElementById('tDate').textContent='待确认';
@@ -313,26 +334,148 @@
       }
       function toWallet(){ setStep(2); }
 
+      function setAdoptionButtonState(label, disabled){
+        const btn = document.getElementById('adoptNowBtn');
+        btn.textContent = label;
+        btn.disabled = !!disabled;
+      }
+      function resetAdoptionButton(){
+        setAdoptionButtonState('云领养', false);
+      }
+      function resetNavWallet(){
+        const btn=document.getElementById('navWalletBtn');
+        btn.classList.remove('connected');
+        btn.textContent='🔗 连接钱包';
+      }
       function setNavWalletConnected(label){
         const btn=document.getElementById('navWalletBtn');
         btn.classList.add('connected');
         btn.textContent='🔗 '+label;
       }
-      function connectWalletFromNav(){
-        setStep(2);
-        document.getElementById('s2').classList.add('ring-hl');
-        const hint = document.getElementById('navHint');
-        hint.classList.add('show');
-        window.clearTimeout(connectWalletFromNav._t);
-        connectWalletFromNav._t = window.setTimeout(()=>{ hint.classList.remove('show'); document.getElementById('s2').classList.remove('ring-hl'); }, 3200);
-        requestAnimationFrame(function(){
-          requestAnimationFrame(function(){
-            var p2 = document.getElementById('p2');
-            if (p2) p2.scrollIntoView({ behavior:'smooth', block:'start' });
+      function getWalletErrorMessage(error, fallback){
+        if (error && error.code === 4001) return '你取消了钱包操作。';
+        if (error && error.message) return fallback + '：' + error.message;
+        return fallback;
+      }
+      async function ensureFujiChain(ethereum){
+        try {
+          await ethereum.request({
+            method: 'wallet_switchEthereumChain',
+            params: [{ chainId: FUJI_CHAIN.chainId }],
           });
+        } catch (error) {
+          if (error && error.code === 4902) {
+            await ethereum.request({
+              method: 'wallet_addEthereumChain',
+              params: [FUJI_CHAIN],
+            });
+            return;
+          }
+          throw error;
+        }
+      }
+      async function connectMetaMask(){
+        const ethereum = window.ethereum;
+        if (!ethereum || typeof ethereum.request !== 'function') {
+          throw new Error('请先安装并解锁 MetaMask。');
+        }
+        const accounts = await ethereum.request({ method: 'eth_requestAccounts' });
+        const address = accounts && accounts[0];
+        if (!address) {
+          throw new Error('未获取到钱包地址。');
+        }
+        walletAddress = address;
+        await ensureFujiChain(ethereum);
+        setNavWalletConnected(shortAddress(address));
+        return { ethereum, address };
+      }
+      async function signAdoptionMessage(ethereum, address){
+        const animal = ANIMALS[current];
+        const message =
+          'FurEver 云领养签名认证\n\n' +
+          '动物：' + animal.name + '\n' +
+          '方案：' + document.getElementById('priceLine').textContent + '\n' +
+          '钱包：' + address + '\n' +
+          '时间：' + new Date().toISOString();
+        await ethereum.request({
+          method: 'personal_sign',
+          params: [message, address],
         });
       }
+      async function sendAdoptionPayment(ethereum, address){
+        return await ethereum.request({
+          method: 'eth_sendTransaction',
+          params: [{
+            from: address,
+            to: DEMO_PAYMENT_TO,
+            value: DEMO_PAYMENT_VALUE_HEX,
+          }],
+        });
+      }
+      async function connectWalletFromNav(){
+        if (isAdopting) return;
+        const hint = document.getElementById('navHint');
+        hint.textContent = '正在连接 MetaMask，请在钱包中确认。';
+        hint.classList.add('show');
+        document.getElementById('s2').classList.add('ring-hl');
+        try {
+          document.getElementById('navWalletBtn').textContent = 'MetaMask 连接中...';
+          await connectMetaMask();
+          hint.textContent = 'MetaMask 已连接，现在可以直接点击右侧「云领养」完成签名和付款。';
+        } catch (error) {
+          resetNavWallet();
+          hint.textContent = getWalletErrorMessage(error, '连接钱包未完成');
+        }
+        window.clearTimeout(connectWalletFromNav._t);
+        connectWalletFromNav._t = window.setTimeout(()=>{
+          hint.textContent = NAV_HINT_DEFAULT;
+          hint.classList.remove('show');
+          document.getElementById('s2').classList.remove('ring-hl');
+        }, 3200);
+      }
       document.getElementById('navWalletBtn').addEventListener('click', connectWalletFromNav);
+      function unsupportedWallet(name){
+        alert(name + ' 暂未开放，当前仅支持 MetaMask。');
+      }
+      async function startCloudAdoption(){
+        if (isAdopting) return;
+        isAdopting = true;
+        wallet = 'MetaMask';
+        setStep(3);
+        document.getElementById('walletLine').textContent = '钱包：MetaMask 连接中...';
+        setAdoptionButtonState('签名认证中...', true);
+        try {
+          const { ethereum, address } = await connectMetaMask();
+          document.getElementById('walletLine').textContent = '钱包：MetaMask ' + shortAddress(address);
+          await signAdoptionMessage(ethereum, address);
+          setAdoptionButtonState('付款确认中...', true);
+          tx = await sendAdoptionPayment(ethereum, address);
+          guarded = true;
+          document.getElementById('statusBadge').textContent='已被守护';
+          document.getElementById('statusBadge').className='badge done';
+          document.getElementById('tDate').textContent='刚刚';
+          document.getElementById('tTitle').textContent='已被守护';
+          document.getElementById('tDesc').textContent='MetaMask 签名与测试网付款已完成，云领养交易已写入链上。';
+          const a=document.getElementById('txLink');
+          a.href=explorer+tx; a.textContent='查看交易 '+short(tx);
+          const lt = document.getElementById('latestTx');
+          lt.innerHTML='<a class="mono" style="color:#4A90D9;text-decoration:underline" target="_blank" rel="noreferrer" href="'+explorer+tx+'">'+short(tx)+'</a>';
+          setAdoptionButtonState('已完成领养', true);
+          setStep(4);
+        } catch (error) {
+          console.error('MetaMask adoption failed:', error);
+          alert(getWalletErrorMessage(error, '云领养未完成'));
+          setStep(1);
+          resetAdoptionButton();
+          if (walletAddress) {
+            setNavWalletConnected(shortAddress(walletAddress));
+          } else {
+            resetNavWallet();
+          }
+        } finally {
+          isAdopting = false;
+        }
+      }
 
       function confirmTx(w){
         wallet=w; document.getElementById('walletLine').textContent='钱包：'+wallet; setStep(3);
